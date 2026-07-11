@@ -14,9 +14,13 @@ DATA_CONFIG:
     }
 
     SAMPLE_INTERVAL: {
-        'train': 1, 
+        'train': 1,
         'test': 1
     }
+
+    NO_SHUFFLE: True
+
+    FULL_SHUFFLE_INSTRUCTION_DATASET: False
 
     INFO_FILTER_DICT: 
         filter_info_by_object_type: *object_type
@@ -66,7 +70,7 @@ MODEL:
         NUM_DECODER_LAYERS: 6 
         NUM_ATTN_HEAD: 8
         MAP_D_MODEL: 256
-        DROPOUT_OF_ATTN: 0.1 
+        DROPOUT_OF_ATTN: 0.0
 
         NUM_BASE_MAP_POLYLINES: 256
         NUM_WAYPOINT_MAP_POLYLINES: 128
