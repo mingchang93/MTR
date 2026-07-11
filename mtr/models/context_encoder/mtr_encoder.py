@@ -12,7 +12,7 @@ import torch.nn as nn
 from mtr.models.utils.transformer import transformer_encoder_layer, position_encoding_utils
 from mtr.models.utils import polyline_encoder
 from mtr.utils import common_utils
-from mtr.ops.knn import knn_utils
+from mtr.ops.knn import knn_batch_mlogk
 
 
 class MTREncoder(nn.Module):
@@ -118,7 +118,7 @@ class MTREncoder(nn.Module):
         batch_offsets = common_utils.get_batch_offsets(batch_idxs=batch_idxs, bs=batch_size).int()  # (batch_size + 1)
         batch_cnt = batch_offsets[1:] - batch_offsets[:-1]
 
-        index_pair = knn_utils.knn_batch_mlogk(
+        index_pair = knn_batch_mlogk(
             x_pos_stack, x_pos_stack,  batch_idxs, batch_offsets, num_of_neighbors
         )  # (num_valid_elems, K)
 

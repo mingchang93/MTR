@@ -8,6 +8,7 @@
 Mostly copy-paste from https://github.com/dvlab-research/DeepVision3D/blob/master/EQNet/eqnet/transformer/multi_head_attention.py
 """
 
+import os
 import warnings
 import torch
 from torch.nn import Linear
@@ -19,6 +20,8 @@ from torch.nn import functional as F
 import torch.nn as nn
 
 from mtr.ops import attention
+
+_MTR_ATTENTION_CPU_FALLBACK = os.environ.get('MTR_ATTENTION_CPU_FALLBACK', '0') == '1'
 
 
 class MultiheadAttentionLocal(nn.Module):
@@ -62,7 +65,7 @@ class MultiheadAttentionLocal(nn.Module):
             self.head_dim * num_heads == self.embed_dim
         ), "embed_dim must be divisible by num_heads"
 
-        assert version in ['v1', 'v2'], 'only attention_utils_v1 and attention_utils_v2 are available.'
+        assert version in attention.__all__, f'Invalid attention version: {version}. Available: {list(attention.__all__.keys())}'
         # self.attention_utils = attention.__all__[version]
         self.attention_version = version
 
@@ -153,16 +156,29 @@ class MultiheadAttentionLocal(nn.Module):
         """
         total_query_len, embed_dim = query.size()
         max_memory_len = index_pair.shape[1]
-        
+
         if vdim is None:
             assert key.size() == value.size()
             vdim = embed_dim
             v_head_dim = self.head_dim
         else:
             v_head_dim = vdim // self.num_heads
-            assert v_head_dim * self.num_heads == vdim 
+            assert v_head_dim * self.num_heads == vdim
 
         scaling = float(self.head_dim) ** -0.5
+
+        # MTR_ATTENTION_CPU_FALLBACK: move tensors to CPU for attention computation
+        if _MTR_ATTENTION_CPU_FALLBACK:
+            dev = query.device
+            query = query.cpu()
+            key = key.cpu()
+            value = value.cpu()
+            index_pair = index_pair.cpu()
+            query_batch_cnt = query_batch_cnt.cpu()
+            key_batch_cnt = key_batch_cnt.cpu()
+            index_pair_batch = index_pair_batch.cpu()
+        else:
+            dev = None
 
         # generate qkv features.
         if not self.without_weight:
@@ -177,6 +193,8 @@ class MultiheadAttentionLocal(nn.Module):
         # -1 in index_pair means this key not joining attention computation.
         used_attn_mask = (index_pair == -1)  # Ignore the -1 pair.
         if attn_mask is not None:
+            if _MTR_ATTENTION_CPU_FALLBACK:
+                attn_mask = attn_mask.cpu()
             # attn_mask should have a shape as [total_query_size, max_memory_size]
             attn_mask = attn_mask.to(torch.bool)
             used_attn_mask = torch.logical_or(used_attn_mask, attn_mask)
@@ -201,6 +219,8 @@ class MultiheadAttentionLocal(nn.Module):
             attn_output_weights = attn_output_weights + rpe_attn_weight
 
         if relative_atten_weights is not None:
+            if _MTR_ATTENTION_CPU_FALLBACK:
+                relative_atten_weights = relative_atten_weights.cpu()
             # relative_atten_weights: A float tensor with shape [total_query_num, max_memory_num, nhead]
             attn_output_weights = attn_output_weights + relative_atten_weights
 
@@ -224,5 +244,9 @@ class MultiheadAttentionLocal(nn.Module):
         
         if self.out_proj is not None:
             attn_output = F.linear(attn_output, self.out_proj.weight, self.out_proj.bias)
+
+        if _MTR_ATTENTION_CPU_FALLBACK:
+            attn_output = attn_output.to(dev)
+            return attn_output, (attn_output_weights.sum(dim=-1) / self.num_heads).to(dev)
 
         return attn_output, attn_output_weights.sum(dim=-1) / self.num_heads

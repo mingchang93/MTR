@@ -13,6 +13,37 @@ import pickle
 import shutil
 
 
+# ======================== Device Detection ========================
+
+def _detect_use_npu():
+    """Detect whether NPU is available at runtime."""
+    try:
+        import torch_npu  # noqa: F401
+        if torch.npu.is_available():
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+_IS_NPU_AVAILABLE = _detect_use_npu()
+
+
+def get_device_count():
+    """Return the number of available devices (NPU or GPU)."""
+    if _IS_NPU_AVAILABLE:
+        return torch.npu.device_count()
+    return torch.cuda.device_count()
+
+
+def set_device(device_idx):
+    """Set the current device (NPU or GPU)."""
+    if _IS_NPU_AVAILABLE:
+        torch.npu.set_device(device_idx)
+    else:
+        torch.cuda.set_device(device_idx)
+
+
 def check_numpy_to_torch(x):
     if isinstance(x, np.ndarray):
         return torch.from_numpy(x).float(), True
@@ -121,7 +152,7 @@ def get_dist_info(return_gpu_per_machine=False):
         world_size = 1
 
     if return_gpu_per_machine:
-        gpu_per_machine = torch.cuda.device_count()
+        gpu_per_machine = get_device_count()
         return rank, world_size, gpu_per_machine
 
     return rank, world_size
@@ -133,7 +164,7 @@ def get_batch_offsets(batch_idxs, bs):
     :param bs: int
     :return: batch_offsets: (bs + 1)
     '''
-    batch_offsets = torch.zeros(bs + 1).int().cuda()
+    batch_offsets = torch.zeros(bs + 1).int().npu() if _IS_NPU_AVAILABLE else torch.zeros(bs + 1).int().cuda()
     for i in range(bs):
         batch_offsets[i + 1] = batch_offsets[i] + (batch_idxs == i).sum()
     assert batch_offsets[-1] == batch_idxs.shape[0]
@@ -146,6 +177,8 @@ def set_random_seed(seed):
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    torch.use_deterministic_algorithms(True)
 
 
 
@@ -162,8 +195,8 @@ def init_dist_slurm(tcp_port, local_rank, backend='nccl'):
     proc_id = int(os.environ['SLURM_PROCID'])
     ntasks = int(os.environ['SLURM_NTASKS'])
     node_list = os.environ['SLURM_NODELIST']
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(proc_id % num_gpus)
+    num_gpus = get_device_count()
+    set_device(proc_id % num_gpus)
     addr = subprocess.getoutput('scontrol show hostname {} | head -n1'.format(node_list))
     os.environ['MASTER_PORT'] = str(tcp_port)
     os.environ['MASTER_ADDR'] = addr
@@ -179,8 +212,8 @@ def init_dist_slurm(tcp_port, local_rank, backend='nccl'):
 def init_dist_pytorch(tcp_port, local_rank, backend='nccl'):
     # if mp.get_start_method(allow_none=True) is None:
     #     mp.set_start_method('spawn')
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(local_rank % num_gpus)
+    num_gpus = get_device_count()
+    set_device(local_rank % num_gpus)
 
     dist.init_process_group(
         backend=backend,
