@@ -23,6 +23,12 @@ from mtr.models import model as model_utils
 
 from train_utils.train_utils import train_model
 
+from msprobe.pytorch import PrecisionDebugger, seed_all
+seed_all(seed=666, mode=True, rm_dropout=True, is_enhanced=True)
+if hasattr(torch, 'npu'):
+    import torch_npu
+    from torch_npu.contrib import transfer_to_npu
+
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -39,7 +45,7 @@ def parse_config():
     parser.add_argument('--without_sync_bn', action='store_true', default=False, help='whether to use sync bn')
     parser.add_argument('--fix_random_seed', action='store_true', default=False, help='')
     parser.add_argument('--ckpt_save_interval', type=int, default=2, help='number of training epochs')
-    parser.add_argument('--local_rank', type=int, default=None, help='local rank for distributed training')
+    parser.add_argument('--local_rank', '--local-rank', type=int, default=None, help='local rank for distributed training')
     parser.add_argument('--max_ckpt_save_num', type=int, default=5, help='max number of saved checkpoint')
     parser.add_argument('--merge_all_iters_to_one_epoch', action='store_true', default=False, help='')
     parser.add_argument('--set', dest='set_cfgs', default=None, nargs=argparse.REMAINDER,
